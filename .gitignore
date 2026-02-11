@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+config.json
+*.log
+*.zip
+test_results_*.json
+debug_responses/
+proof_results.txt
+message_to_client.txt
+client_2captcha_explanation.txt
+2captcha_full_explanation.txt
