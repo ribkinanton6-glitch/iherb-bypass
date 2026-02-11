@@ -181,27 +181,34 @@ class CloudflareBypass:
     
     def _is_cloudflare_challenge(self, html: str) -> bool:
         """Check if the HTML is a Cloudflare challenge page"""
+        html_lower = html.lower()
+        
+        # 1. First check if we got actual iHerb content (Priority)
+        iherb_markers = ['iherb', 'product', 'price', 'cart', 'add to cart', 'search results']
+        for marker in iherb_markers:
+            if marker in html_lower and len(html) > 5000:  # Real pages are usually large
+                return False  # Not a challenge, it's real content
+        
+        # 2. Check for Cloudflare challenge markers
         cloudflare_markers = [
-            'Checking your browser',
-            'Just a moment',
-            'Enable JavaScript and cookies to continue',
+            'checking your browser',
+            'just a moment',
+            'enable javascript and cookies to continue',
             'cf-browser-verification',
             'cf_chl_opt',
             'challenge-platform',
-            'ray id',
-            'cloudflare',
+            'verifying you are human',
         ]
         
-        html_lower = html.lower()
         for marker in cloudflare_markers:
-            if marker.lower() in html_lower:
+            if marker in html_lower:
                 return True
         
-        # Also check if we got actual iHerb content
-        iherb_markers = ['iherb', 'product', 'price', 'cart', 'add to cart']
-        has_iherb_content = any(marker.lower() in html_lower for marker in iherb_markers)
-        
-        return not has_iherb_content
+        # 3. If no iHerb content and page is very small, likely blocked/error
+        if len(html) < 2000:
+            return True
+            
+        return False
     
     async def close(self):
         """Clean up browser resources"""
