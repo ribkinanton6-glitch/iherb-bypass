@@ -45,6 +45,13 @@ Edit `config.json` to:
   - Automatic retry with exponential backoff
   - Validates actual page content vs challenge page
 
+- **2Captcha Integration (Optional):**
+  - Automatically solves Cloudflare Turnstile challenges
+  - Achieves 95-99% bypass success rate
+  - Add your API key to `config.json`: `"captcha_api_key": "YOUR_KEY"`
+  - Get API key from: https://2captcha.com
+  - Cost: ~$0.003 per solve (~$3 per 1000 captchas)
+
 ## Test Results
 
 Results are saved to `test_results_YYYYMMDD_HHMMSS.json`

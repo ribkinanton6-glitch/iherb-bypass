@@ -7,8 +7,17 @@ import json
 import random
 import time
 import sys
+import re
 from pathlib import Path
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+
+# 2Captcha integration
+try:
+    from twocaptcha import TwoCaptcha
+    CAPTCHA_AVAILABLE = True
+except ImportError:
+    CAPTCHA_AVAILABLE = False
+    print("[!] 2captcha-python not installed. Captcha solving disabled.")
 
 # Fix Windows console encoding
 if sys.platform == 'win32':
@@ -23,6 +32,12 @@ class CloudflareBypass:
         self.stealth = self.config['stealth_settings']
         self.browser: Browser = None
         self.context: BrowserContext = None
+        
+        # Initialize 2Captcha solver if API key provided
+        self.captcha_solver = None
+        if CAPTCHA_AVAILABLE and self.config.get('captcha_api_key'):
+            self.captcha_solver = TwoCaptcha(self.config['captcha_api_key'])
+            print("[+] 2Captcha solver initialized")
     
     async def setup_browser(self, use_proxy: bool = False, proxy_index: int = 0):
         """Initialize browser with stealth settings"""
@@ -165,6 +180,23 @@ class CloudflareBypass:
             # Check if we got Cloudflare challenge
             if self._is_cloudflare_challenge(html):
                 print(f"  [X] Cloudflare challenge detected (attempt {retry_count + 1})")
+                
+                # Try to solve with 2Captcha if available
+                if self.captcha_solver:
+                    print("  [~] Attempting to solve with 2Captcha...")
+                    solved = await self._solve_cloudflare_turnstile(page, url)
+                    if solved:
+                        print("  [✓] Captcha solved! Reloading page...")
+                        await asyncio.sleep(3)
+                        html = await page.content()
+                        
+                        # Check if we got through
+                        if not self._is_cloudflare_challenge(html):
+                            await page.close()
+                            return True, html
+                        else:
+                            print("  [X] Still blocked after captcha solve")
+                
                 await page.close()
                 # Retry with exponential backoff
                 await asyncio.sleep(2 ** retry_count)
@@ -209,6 +241,82 @@ class CloudflareBypass:
             return True
             
         return False
+    
+    async def _solve_cloudflare_turnstile(self, page: Page, url: str) -> bool:
+        """
+        Solve Cloudflare Turnstile challenge using 2Captcha
+        Returns True if solved successfully
+        """
+        try:
+            html = await page.content()
+            
+            # Try to find Turnstile sitekey
+            sitekey_match = re.search(r'data-sitekey="([^"]+)"', html)
+            if not sitekey_match:
+                # Try alternative patterns
+                sitekey_match = re.search(r'sitekey["\']?\s*[:=]\s*["\']([^"\'\']+)', html)
+            
+            if not sitekey_match:
+                print("  [!] Could not find Turnstile sitekey")
+                return False
+            
+            sitekey = sitekey_match.group(1)
+            print(f"  [~] Found sitekey: {sitekey[:20]}...")
+            
+            # Submit to 2Captcha
+            print("  [~] Submitting to 2Captcha (this may take 10-60 seconds)...")
+            result = self.captcha_solver.turnstile(
+                sitekey=sitekey,
+                url=url
+            )
+            
+            token = result['code']
+            print(f"  [✓] Got solution token: {token[:20]}...")
+            
+            # Inject token into page
+            inject_script = f"""
+            (function() {{
+                // Find Turnstile response field
+                let responseField = document.querySelector('[name="cf-turnstile-response"]');
+                if (!responseField) {{
+                    responseField = document.querySelector('input[name*="turnstile"]');
+                }}
+                
+                if (responseField) {{
+                    responseField.value = '{token}';
+                    
+                    // Trigger change event
+                    responseField.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    
+                    // Try to find and submit form
+                    let form = responseField.closest('form');
+                    if (form) {{
+                        form.submit();
+                    }}
+                    
+                    return true;
+                }} else {{
+                    // Try alternative: call Turnstile callback directly
+                    if (window.turnstile && window.turnstile.reset) {{
+                        window.turnstile.reset();
+                    }}
+                    return false;
+                }}
+            }})()
+            """
+            
+            injection_result = await page.evaluate(inject_script)
+            if injection_result:
+                print("  [✓] Token injected successfully")
+            else:
+                print("  [!] Could not inject token (trying page reload)")
+                await page.reload(wait_until='networkidle')
+            
+            return True
+            
+        except Exception as e:
+            print(f"  [!] 2Captcha error: {str(e)[:100]}")
+            return False
     
     async def close(self):
         """Clean up browser resources"""

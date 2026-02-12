@@ -8,6 +8,7 @@
             "password": "YOUR_PROXY_PASSWORD"
         }
     ],
+    "captcha_api_key": "YOUR_2CAPTCHA_API_KEY_HERE",
     "test_urls": [
         "https://www.iherb.com/pr/now-foods-omega-3-180-epa-120-dha-200-softgels/424",
         "https://www.iherb.com/pr/california-gold-nutrition-vitamin-d3-125-mcg-5000-iu-360-fish-gelatin-softgels/61865",
