@@ -76,19 +76,29 @@ class CloudflareBypass:
             'java_script_enabled': True,
         }
         
-        # Add proxy if requested
-        if use_proxy and self.config['proxies']:
+        proxy_options = None
+        if use_proxy and self.config.get('proxies'):
             proxy = self.config['proxies'][proxy_index % len(self.config['proxies'])]
-            context_options['proxy'] = {
+            proxy_options = {
                 'server': f"{proxy['type']}://{proxy['host']}:{proxy['port']}",
                 'username': proxy['username'],
                 'password': proxy['password']
             }
             print(f"Using proxy: {proxy['host']}:{proxy['port']}")
+            
+        headless_mode = True # Default to headless
+        if 'stealth_settings' in self.config:
+             headless_mode = self.config['stealth_settings'].get('headless', True)
+
+        # Launch browser
+        self.browser = await playwright.chromium.launch(
+            headless=headless_mode,
+            args=args,
+            proxy=proxy_options
+        )
         
         self.context = await self.browser.new_context(**context_options)
         
-        # Apply CDP patches to hide automation
         # Apply CDP patches to hide automation
         await self._apply_stealth_patches()
         
