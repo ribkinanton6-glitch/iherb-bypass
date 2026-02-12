@@ -3,15 +3,17 @@
         {
             "type": "http",
             "host": "YOUR_PROXY_HOST",
-            "port": 12345,
-            "username": "YOUR_USERNAME",
-            "password": "YOUR_PASSWORD"
+            "port": 443,
+            "username": "YOUR_PROXY_USERNAME",
+            "password": "YOUR_PROXY_PASSWORD"
         }
     ],
     "test_urls": [
         "https://www.iherb.com/pr/now-foods-omega-3-180-epa-120-dha-200-softgels/424",
         "https://www.iherb.com/pr/california-gold-nutrition-vitamin-d3-125-mcg-5000-iu-360-fish-gelatin-softgels/61865",
-        "https://www.iherb.com/pr/now-foods-vitamin-d-3-2000-iu-240-softgels/419"
+        "https://www.iherb.com/pr/now-foods-vitamin-d-3-2000-iu-240-softgels/419",
+        "https://www.iherb.com/pr/california-gold-nutrition-omega-3-premium-fish-oil-240-fish-gelatin-softgels/61896",
+        "https://www.iherb.com/pr/now-foods-magnesium-citrate-200-mg-250-tablets/727"
     ],
     "stealth_settings": {
         "min_delay_ms": 1000,
