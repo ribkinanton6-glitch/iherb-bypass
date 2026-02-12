@@ -52,6 +52,11 @@ Edit `config.json` to:
   - Get API key from: https://2captcha.com
   - Cost: ~$0.003 per solve (~$3 per 1000 captchas)
 
+- **Advanced Bypass Features:**
+  - **Session Persistence**: Automatically saves cookies from successful sessions to `cookies.json`.
+  - **Cookie Reuse**: Uses saved cookies for subsequent requests, significantly reducing Cloudflare checks.
+  - **Human Emulation**: Simulates mouse movements during Cloudflare challenges to prove humanity.
+
 ## Test Results
 
 Results are saved to `test_results_YYYYMMDD_HHMMSS.json`

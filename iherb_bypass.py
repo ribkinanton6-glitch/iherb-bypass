@@ -89,7 +89,11 @@ class CloudflareBypass:
         self.context = await self.browser.new_context(**context_options)
         
         # Apply CDP patches to hide automation
+        # Apply CDP patches to hide automation
         await self._apply_stealth_patches()
+        
+        # Load tokens if available
+        await self._load_cookies(self.context)
         
         return self.context
     
@@ -168,11 +172,12 @@ class CloudflareBypass:
                 self.stealth['max_delay_ms'] / 1000
             ))
             
-            # Navigate to page
-            response = await page.goto(url, wait_until='networkidle', timeout=self.stealth['timeout_ms'])
+            # Navigate to page (use domcontentloaded, NOT networkidle!)
+            # networkidle never completes on Cloudflare pages (they keep polling)
+            response = await page.goto(url, wait_until='domcontentloaded', timeout=self.stealth['timeout_ms'])
             
-            # Wait a bit for any JS challenges to complete
-            await asyncio.sleep(3)
+            # Wait for Cloudflare JS challenge to auto-resolve (up to 15 seconds)
+            await asyncio.sleep(5)
             
             # Get page content
             html = await page.content()
@@ -181,17 +186,33 @@ class CloudflareBypass:
             if self._is_cloudflare_challenge(html):
                 print(f"  [X] Cloudflare challenge detected (attempt {retry_count + 1})")
                 
-                # Try to solve with 2Captcha if available
+                # Wait longer for JS challenge to auto-solve
+                # Wait longer for JS challenge to auto-solve with human interaction
+                print("  [~] Waiting for Cloudflare JS challenge to resolve (with mouse moves)...")
+                for i in range(4):
+                    # Simulate human behavior
+                    await self._humanize_mouse(page)
+                    await asyncio.sleep(random.uniform(2, 4))
+                    
+                    html = await page.content()
+                    if not self._is_cloudflare_challenge(html):
+                        print(f"  [✓] Challenge resolved after interactive wait!")
+                        await self._save_cookies(self.context)
+                        await page.close()
+                        return True, html
+                
+                # Still blocked? Try 2Captcha if available
                 if self.captcha_solver:
                     print("  [~] Attempting to solve with 2Captcha...")
                     solved = await self._solve_cloudflare_turnstile(page, url)
                     if solved:
                         print("  [✓] Captcha solved! Reloading page...")
-                        await asyncio.sleep(3)
+                        await asyncio.sleep(5)
                         html = await page.content()
                         
                         # Check if we got through
                         if not self._is_cloudflare_challenge(html):
+                            await self._save_cookies(self.context)
                             await page.close()
                             return True, html
                         else:
@@ -203,6 +224,7 @@ class CloudflareBypass:
                 return await self.fetch_page(url, retry_count + 1)
             
             # Success!
+            await self._save_cookies(self.context)
             await page.close()
             return True, html
             
@@ -210,16 +232,48 @@ class CloudflareBypass:
             print(f"  [!] Error: {str(e)[:100]}")
             await page.close()
             return False, str(e)
+            
+    async def _humanize_mouse(self, page: Page):
+        """Simulate human-like mouse movements to pass Cloudflare JS challenge"""
+        try:
+            # Move mouse randomly
+            for _ in range(random.randint(3, 7)):
+                x = random.randint(100, 1000)
+                y = random.randint(100, 700)
+                await page.mouse.move(x, y, steps=random.randint(5, 15))
+                await asyncio.sleep(random.uniform(0.1, 0.5))
+        except:
+            pass
+
+    async def _save_cookies(self, context: BrowserContext):
+        """Save cookies to file for persistence"""
+        try:
+            cookies = await context.cookies()
+            with open('cookies.json', 'w') as f:
+                json.dump(cookies, f)
+            # print("  [~] Cookies saved")
+        except:
+            pass
+            
+    async def _load_cookies(self, context: BrowserContext):
+        """Load cookies from file if exists"""
+        try:
+            if os.path.exists('cookies.json'):
+                with open('cookies.json', 'r') as f:
+                    cookies = json.load(f)
+                await context.add_cookies(cookies)
+                print("  [+] Loaded persisted session cookies")
+        except:
+            pass
     
     def _is_cloudflare_challenge(self, html: str) -> bool:
         """Check if the HTML is a Cloudflare challenge page"""
         html_lower = html.lower()
         
-        # 1. First check if we got actual iHerb content (Priority)
-        iherb_markers = ['iherb', 'product', 'price', 'cart', 'add to cart', 'search results']
-        for marker in iherb_markers:
-            if marker in html_lower and len(html) > 5000:  # Real pages are usually large
-                return False  # Not a challenge, it's real content
+        # 1. If page is large (>100KB) and has iHerb content = real page, NOT challenge
+        # Real iHerb pages are 1-2MB+, Cloudflare challenges are ~28KB
+        if len(html) > 100000:
+            return False
         
         # 2. Check for Cloudflare challenge markers
         cloudflare_markers = [
@@ -236,8 +290,8 @@ class CloudflareBypass:
             if marker in html_lower:
                 return True
         
-        # 3. If no iHerb content and page is very small, likely blocked/error
-        if len(html) < 2000:
+        # 3. If page is very small, likely blocked/error
+        if len(html) < 5000:
             return True
             
         return False
@@ -258,7 +312,10 @@ class CloudflareBypass:
             
             if not sitekey_match:
                 print("  [!] Could not find Turnstile sitekey")
-                return False
+                print("  [~] Trying fallback: waiting for JS Challenge auto-solve...")
+                # Wait for Cloudflare JS Challenge to auto-solve (10 seconds)
+                await asyncio.sleep(10)
+                return True  # Return True to indicate we tried
             
             sitekey = sitekey_match.group(1)
             print(f"  [~] Found sitekey: {sitekey[:20]}...")
@@ -331,9 +388,9 @@ async def main():
     bypass = CloudflareBypass()
     
     try:
-        # Test without proxy
-        print("Testing WITHOUT proxy...")
-        await bypass.setup_browser(use_proxy=False)
+        # Test WITH proxy by default
+        print("Testing WITH proxy...")
+        await bypass.setup_browser(use_proxy=True)
         
         url = "https://www.iherb.com/pr/now-foods-omega-3-180-epa-120-dha-200-softgels/424"
         success, html = await bypass.fetch_page(url)
