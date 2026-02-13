@@ -86,9 +86,9 @@ class CloudflareBypass:
             }
             print(f"Using proxy: {proxy['host']}:{proxy['port']}")
             
-        headless_mode = True # Default to headless
+        headless_mode = False # Default to visible (Github standard)
         if 'stealth_settings' in self.config:
-             headless_mode = self.config['stealth_settings'].get('headless', True)
+             headless_mode = self.config['stealth_settings'].get('headless', False)
 
         # Launch browser
         self.browser = await playwright.chromium.launch(
@@ -182,77 +182,132 @@ class CloudflareBypass:
                 self.stealth['max_delay_ms'] / 1000
             ))
             
+            # Check if browser is alive
+            if not self.browser or not self.browser.is_connected():
+                print("  [!] Browser disconnected. Restarting...")
+                await self.setup_browser(use_proxy=True) # Assuming proxy usage if we are here deep in tests
+                page = await self.context.new_page()
+
             # Navigate to page (use domcontentloaded, NOT networkidle!)
-            # networkidle never completes on Cloudflare pages (they keep polling)
-            response = await page.goto(url, wait_until='domcontentloaded', timeout=self.stealth['timeout_ms'])
-            
+            try:
+                response = await page.goto(url, wait_until='domcontentloaded', timeout=self.stealth['timeout_ms'])
+            except Exception as e:
+                if "Target closed" in str(e) or "Connection closed" in str(e):
+                     print("  [!] Browser crashed during navigation. Retrying...")
+                     return False, "Browser Crashed"
+                raise e
+
             # Wait for Cloudflare JS challenge to auto-resolve (up to 15 seconds)
             await asyncio.sleep(5)
             
-            # Get page content
-            html = await page.content()
-            
+            # Get page content safely
+            try:
+                html = await page.content()
+            except Exception as e:
+                print(f"  [!] Error reading content (likely navigating): {str(e)[:50]}")
+                # Wait a bit and try again
+                await asyncio.sleep(2)
+                try:
+                    html = await page.content()
+                except:
+                     return False, "Page navigation error"
+
             # Check if we got Cloudflare challenge
             if self._is_cloudflare_challenge(html):
                 print(f"  [X] Cloudflare challenge detected (attempt {retry_count + 1})")
                 
-                # Wait longer for JS challenge to auto-solve
+                # Check for Turnstile
+                try:
+                    is_turnstile = await self._solve_cloudflare_turnstile(page, url)
+                    if is_turnstile:
+                         # Wait for reload after potential solve
+                         await asyncio.sleep(5)
+                         try:
+                            html = await page.content()
+                         except:
+                             pass
+                         if not self._is_cloudflare_challenge(html):
+                             await self._save_cookies(self.context)
+                             await page.close()
+                             return True, html
+                except Exception as e:
+                     print(f"  [!] Error solving Turnstile: {e}")
+                
                 # Wait longer for JS challenge to auto-solve with human interaction
                 print("  [~] Waiting for Cloudflare JS challenge to resolve (with mouse moves)...")
                 for i in range(4):
-                    # Simulate human behavior
-                    await self._humanize_mouse(page)
-                    await asyncio.sleep(random.uniform(2, 4))
-                    
-                    html = await page.content()
-                    if not self._is_cloudflare_challenge(html):
-                        print(f"  [✓] Challenge resolved after interactive wait!")
-                        await self._save_cookies(self.context)
-                        await page.close()
-                        return True, html
-                
-                # Still blocked? Try 2Captcha if available
-                if self.captcha_solver:
-                    print("  [~] Attempting to solve with 2Captcha...")
-                    solved = await self._solve_cloudflare_turnstile(page, url)
-                    if solved:
-                        print("  [✓] Captcha solved! Reloading page...")
-                        await asyncio.sleep(5)
-                        html = await page.content()
+                    try:
+                        # Simulate human behavior
+                        await self._humanize_mouse(page)
+                        await asyncio.sleep(random.uniform(2, 4))
                         
-                        # Check if we got through
+                        html = await page.content()
                         if not self._is_cloudflare_challenge(html):
-                            await self._save_cookies(self.context)
+                            print(f"  [✓] Challenge resolved after interactive wait!")
+                            await self._save_cookies(self.context) # Save cookies on success
                             await page.close()
                             return True, html
-                        else:
-                            print("  [X] Still blocked after captcha solve")
+                    except Exception as e:
+                        if "Target closed" in str(e) or "Connection closed" in str(e):
+                             print("  [!] Browser crashed during challenge wait.")
+                             return False, "Browser Crashed"
+                        # Ignore other errors (like navigation) and continue loop
+                        pass
+                
+                # If we are here, we failed to bypass
+                if retry_count < self.stealth['max_retries']:
+                    print("  [~] Retrying request...")
+                    await page.close()
+                    return await self.fetch_page(url, retry_count + 1)
                 
                 await page.close()
-                # Retry with exponential backoff
-                await asyncio.sleep(2 ** retry_count)
-                return await self.fetch_page(url, retry_count + 1)
+                return False, html
             
             # Success!
-            await self._save_cookies(self.context)
+            await self._save_cookies(self.context) # Save cookies on success
             await page.close()
             return True, html
             
         except Exception as e:
-            print(f"  [!] Error: {str(e)[:100]}")
-            await page.close()
-            return False, str(e)
+            error_msg = str(e)
+            print(f"  [!] Error: {error_msg[:100]}")
+            try:
+                await page.close()
+            except:
+                pass
+                
+            # Check for critical browser crash
+            if "Connection closed" in error_msg or "Target closed" in error_msg:
+                 self.browser = None # Force restart next time
+                 
+            return False, error_msg
             
     async def _humanize_mouse(self, page: Page):
         """Simulate human-like mouse movements to pass Cloudflare JS challenge"""
         try:
+            if not page or page.is_closed():
+                return
+
+            # Check if page is actually responsive before moving
+            try:
+                # Quick check if main frame is detached
+                if not page.main_frame:
+                    return
+            except:
+                return
+
             # Move mouse randomly
             for _ in range(random.randint(3, 7)):
+                if page.is_closed(): # Double check inside loop
+                    return
+                
                 x = random.randint(100, 1000)
                 y = random.randint(100, 700)
                 await page.mouse.move(x, y, steps=random.randint(5, 15))
                 await asyncio.sleep(random.uniform(0.1, 0.5))
-        except:
+        except Exception as e:
+            # Silently ignore mouse errors (target closed, etc) to prevent crash propagation
+            # print(f"Mouse error: {e}")
             pass
 
     async def _save_cookies(self, context: BrowserContext):
