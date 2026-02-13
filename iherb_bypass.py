@@ -173,8 +173,13 @@ class CloudflareBypass:
         if retry_count >= self.stealth['max_retries']:
             return False, "Max retries exceeded"
         
-        page = await self.context.new_page()
-        
+        # Reuse existing page if available to maintain session "continuity" like a real user
+        page = None
+        if self.context.pages:
+            page = self.context.pages[0]
+        else:
+            page = await self.context.new_page()
+            
         try:
             # Random delay before request (human-like)
             await asyncio.sleep(random.uniform(
@@ -228,7 +233,7 @@ class CloudflareBypass:
                              pass
                          if not self._is_cloudflare_challenge(html):
                              await self._save_cookies(self.context)
-                             await page.close()
+                             # await page.close() # Keep page open for reuse
                              return True, html
                 except Exception as e:
                      print(f"  [!] Error solving Turnstile: {e}")
@@ -245,7 +250,7 @@ class CloudflareBypass:
                         if not self._is_cloudflare_challenge(html):
                             print(f"  [✓] Challenge resolved after interactive wait!")
                             await self._save_cookies(self.context) # Save cookies on success
-                            await page.close()
+                            # await page.close() # Keep page open for reuse
                             return True, html
                     except Exception as e:
                         if "Target closed" in str(e) or "Connection closed" in str(e):
@@ -265,7 +270,7 @@ class CloudflareBypass:
             
             # Success!
             await self._save_cookies(self.context) # Save cookies on success
-            await page.close()
+            # await page.close() # Keep page open for reuse
             return True, html
             
         except Exception as e:
