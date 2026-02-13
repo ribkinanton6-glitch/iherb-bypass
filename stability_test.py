@@ -195,7 +195,8 @@ async def main():
     print(f"Running shortened stability test ({requests_count} req/url) for demonstration.")
     print("To run full 30 req/url, edit stability_test.py line 166.")
     
-    await tester.run_test(use_proxy=True, requests_per_url=requests_count)
+    # Run WITHOUT proxy to test if crashes still happen
+    await tester.run_test(use_proxy=False, requests_per_url=requests_count)
     
     tester.print_summary()
 
