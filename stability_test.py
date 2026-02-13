@@ -2,6 +2,7 @@
 Stability Test Runner
 Tests the iHerb bypass script with 5 URLs × 30 requests each
 """
+print("DEBUG: Script started!")
 import asyncio
 import json
 import sys
@@ -190,13 +191,14 @@ async def main():
     # That is too long for this interaction (20+ mins).
     # I'll do 5 URLs * 5 requests = 25 requests. It shows stability.
     
-    requests_count = 5 
+    # The agreed test was 5 URLs x 30 requests.
+    requests_count = 30
     
-    print(f"Running shortened stability test ({requests_count} req/url) for demonstration.")
-    print("To run full 30 req/url, edit stability_test.py line 166.")
+    print(f"Running FULL stability test ({requests_count} req/url).")
+    print("This may take 10-20 minutes depending on proxy speed.")
     
-    # Run WITHOUT proxy to test if crashes still happen
-    await tester.run_test(use_proxy=False, requests_per_url=requests_count)
+    # Run WITH proxy (final verification)
+    await tester.run_test(use_proxy=True, requests_per_url=requests_count)
     
     tester.print_summary()
 
@@ -205,5 +207,5 @@ if __name__ == "__main__":
     asyncio.run(main())
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+
+
