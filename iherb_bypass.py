@@ -1,6 +1,7 @@
 """
 iHerb Cloudflare Bypass Script
 Uses Playwright + stealth techniques to bypass Cloudflare protection
+Updated: 2026-02-15 (Stealth Patch Force Update)
 """
 import asyncio
 import json
@@ -65,15 +66,17 @@ class CloudflareBypass:
         )
         
         # Context options
+        # Context options
         context_options = {
             'viewport': {'width': 1920, 'height': 1080},
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
             'locale': 'en-US',
             'timezone_id': 'America/New_York',
             'permissions': ['geolocation'],
             'geolocation': {'latitude': 40.7128, 'longitude': -74.0060},
             'color_scheme': 'light',
             'java_script_enabled': True,
+            'has_touch': False,
         }
         
         proxy_options = None
@@ -111,30 +114,49 @@ class CloudflareBypass:
         """Apply Chrome DevTools Protocol patches to hide automation"""
         # This will be applied to all pages in the context
         await self.context.add_init_script("""
-            // Overwrite the `navigator.webdriver` property
+            // 1. Pass the Webdriver Test
             Object.defineProperty(navigator, 'webdriver', {
                 get: () => undefined
             });
             
-            // Overwrite the `navigator.plugins` to look real
+            // 2. Mock Plugins (Standard Chrome Set)
+            const mockPlugins = [
+                { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                { name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }
+            ];
+            
             Object.defineProperty(navigator, 'plugins', {
-                get: () => [1, 2, 3, 4, 5]
+                get: () => {
+                    const p = [...mockPlugins];
+                    p.item = (i) => p[i];
+                    p.namedItem = (name) => p.find(x => x.name === name);
+                    p.refresh = () => {};
+                    return p;
+                }
             });
             
-            // Overwrite the `navigator.languages` to look real
+            // 3. Mock Languages
             Object.defineProperty(navigator, 'languages', {
                 get: () => ['en-US', 'en']
             });
             
-            // Remove Playwright-specific properties
+            // 4. Remove Playwright-specific properties
             delete navigator.__proto__.webdriver;
             
-            // Mock chrome runtime
-            window.chrome = {
-                runtime: {}
-            };
+            // 5. Mock window.chrome
+            if (!window.chrome) {
+                window.chrome = {
+                    runtime: {},
+                    loadTimes: function() {},
+                    csi: function() {},
+                    app: {}
+                };
+            }
             
-            // Mock permissions
+            // 6. Mock Permissions
             const originalQuery = window.navigator.permissions.query;
             window.navigator.permissions.query = (parameters) => (
                 parameters.name === 'notifications' ?
@@ -142,7 +164,17 @@ class CloudflareBypass:
                     originalQuery(parameters)
             );
             
-            // Randomize canvas fingerprint slightly
+            // 7. Hardware Concurrency
+            Object.defineProperty(navigator, 'hardwareConcurrency', {
+                get: () => 8
+            });
+            
+            // 8. Device Memory
+            Object.defineProperty(navigator, 'deviceMemory', {
+                get: () => 8
+            });
+
+            // 9. Randomize canvas fingerprint slightly
             const getImageData = CanvasRenderingContext2D.prototype.getImageData;
             CanvasRenderingContext2D.prototype.getImageData = function(...args) {
                 const imageData = getImageData.apply(this, args);
@@ -152,14 +184,14 @@ class CloudflareBypass:
                 return imageData;
             };
             
-            // Mock WebGL vendor
+            // 10. Mock WebGL vendor
             const getParameter = WebGLRenderingContext.prototype.getParameter;
             WebGLRenderingContext.prototype.getParameter = function(parameter) {
                 if (parameter === 37445) {
-                    return 'Intel Inc.';
+                    return 'Google Inc. (Intel)';
                 }
                 if (parameter === 37446) {
-                    return 'Intel Iris OpenGL Engine';
+                    return 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics (0x000046A6) Direct3D11 vs_5_0 ps_5_0, D3D11)';
                 }
                 return getParameter.apply(this, arguments);
             };
